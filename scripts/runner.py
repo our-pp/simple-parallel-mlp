@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 LOSS_PATTERN = re.compile(r"Loss: (\d+\.\d+)")
 TIME_PATTERN = re.compile(r"time: (\d+\.\d+) sec")
 BIN_DIR = Path.home() / "PP-final" / "experiment" / "bin"
+IMAGE_DIR = Path.home() / "PP-final" / "experiment" / "image"
 
 VERSION_NAME_MAP = {
     "s": "singleThread",
@@ -47,7 +48,7 @@ def configure_arguments() -> RunArgument:
     return parser.parse_args()
 
 
-def run_task(args: RunArgument) -> None:
+def run_task(args: RunArgument) -> tuple[list[float], float]:
     result = subprocess.check_output(
         [
             BIN_DIR / VERSION_NAME_MAP[args.version],
@@ -76,7 +77,7 @@ def run_task(args: RunArgument) -> None:
     
     time = float(matched.group(1))
 
-    return loss,time
+    return loss, time
 
 
 def draw_line_chart(loss: Iterable[float], output_filename: str) -> None:
@@ -84,7 +85,7 @@ def draw_line_chart(loss: Iterable[float], output_filename: str) -> None:
     plt.title(output_filename.removesuffix(".png").replace("-", " ").capitalize())
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.savefig(output_filename)
+    plt.savefig(IMAGE_DIR / output_filename)
 
 
 def main() -> None:
