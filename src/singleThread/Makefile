@@ -13,7 +13,7 @@ OBJ := $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRC))
 
 all: $(LIB)
 
-$(LIB): $(OBJ)
+$(LIB): $(OBJ) model.h
 	ar -rcs $@ -o $^
 
 $(OBJ_DIR)/%.o: %.cpp

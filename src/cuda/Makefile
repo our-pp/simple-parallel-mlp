@@ -21,7 +21,7 @@ all: $(LIB)
 $(TEST_APP): $(LIB)
 	$(NVCC) test.cpp $(CUDA_LINK_FLAGS) -o $@ $(LIB)
 
-$(LIB): $(OBJ)
+$(LIB): $(OBJ) model.h
 	ar -rcs $@ -o $^
 
 $(OBJ_DIR)/%.o: %.cu
