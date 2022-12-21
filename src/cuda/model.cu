@@ -1,6 +1,11 @@
 #include "model.h"
 
 
+int hidden_dim = 300;
+
+void set_hidden_layer_size(int new_size) {
+    hidden_dim = new_size;
+}
 
 data_t *toDevice(const size_t n, data_t *x) {
     data_t *ret;
@@ -38,7 +43,7 @@ void print(size_t n, data_t *a) {
     data_t *temp = (data_t*)malloc(n * sizeof(data_t));
     cudaMemcpy(temp, a, n * sizeof(data_t), cudaMemcpyDeviceToHost);
     for(int i = 0; i < n; ++i) {
-        printf("%f ", temp[i]);
+        printf("%f ", (double)temp[i]);
     }
     printf("\n");
     free(temp);
@@ -61,6 +66,7 @@ __global__ void __fill__(size_t n, data_t *a, const data_t val) {
 void fill_val(size_t n, data_t *a, const data_t val) {
     int numBlocks = (n - 1) / 32 + 1;
     __fill__<<<numBlocks, 32>>>(n, a, val);
+    // print(output_dim, a);
 }
 
 data_t sigmoid(data_t x) {
@@ -203,6 +209,7 @@ model::~model()  {
     cudaFree(grad_w_1);
     cudaFree(grad_w_2);
     cudaFree(grad_loss);
+    cudaFree(prev_grad);
     cudaFree(grad_bias_1);
     cudaFree(grad_bias_2);
     cudaFree(grad_sigmoid_1);
@@ -240,7 +247,7 @@ model::model() {
 }
 
 data_t* model::forward(size_t batch_size, data_t *x) {
-    batch_count += batch_size;
+    batch_count += (data_t)batch_size;
     // first layer forward
     data_t *temp_1;
     cudaMalloc(&temp_1, batch_size * hidden_dim * sizeof(data_t));
@@ -292,7 +299,10 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     }
     // second layer forward
     data_t *temp_2;
-    cudaMalloc(&temp_2, hidden_dim * output_dim *  sizeof(data_t));
+    cudaMalloc(&temp_2, batch_size * output_dim *  sizeof(data_t));
+    fill_val(batch_size * output_dim, temp_2, 0);
+    // printf("????????\n");
+    // print(output_dim, temp_2);
     {   
         dim3 numBlocks((batch_size - 1) / 32 + 1, (output_dim - 1) / 32 + 1);
         dim3 numThreads(32, 32);
@@ -306,6 +316,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
         //     }
         // }
     }
+    
+    // print(output_dim, temp_2);
     // add bias
     {
         dim3 numBlocks((batch_size - 1) / 32 + 1, (output_dim - 1) / 32 + 1);
@@ -346,17 +358,20 @@ data_t* model::forward(size_t batch_size, data_t *x) {
 __global__ void __loss__(const size_t batch_size, data_t *pred, data_t *real, data_t *grad, data_t *err) {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
     if(i < batch_size) {
+        data_t temp_err = 0.0;
         for(int j = 0; j < output_dim; ++j) {
             data_t temp = pred[i * output_dim + j] - real[i * output_dim + j];
+            temp_err += temp * temp;
             atomicAdd(grad + j, temp);
-            atomicAdd(err, temp * temp);
         }
+        atomicAdd(err, temp_err);
     }
 }
 
 data_t model::loss(size_t batch_size, data_t *pred, data_t *real) {
     data_t err = 0.0;
     data_t *device_err;
+    // print(output_dim, pred);
     cudaMalloc(&device_err, sizeof(data_t));
     cudaMemset(device_err, 0, sizeof(data_t));
     int numBlocks = (batch_size - 1) / 32 + 1;
@@ -446,7 +461,6 @@ void model::backward() {
         //     }
         // }
     }
-    
     // grad of first sigmoid
     {
         int numBlocks = (hidden_dim - 1) / 32 + 1;

@@ -1,11 +1,21 @@
 #ifndef _MODEL_H_
 #define _MODEL_H_
 
-#include "settings.h"
-
 #include <string.h>
 #include <math.h>
 #include <random>
+
+// model setting
+const int input_dim = 784;
+int hidden_dim = 300;
+const int output_dim = 10;
+
+void set_hidden_layer_size(int new_size) { hidden_dim = new_size; }
+
+// data type
+using data_t = float;
+
+void print(size_t n, data_t *a) {}
 
 int *toDevice(const size_t n, int *x) {
     return x;
@@ -134,7 +144,7 @@ class model {
                 }
             }
             // second layer forward
-            data_t *temp_2 = (data_t*)malloc(hidden_dim * output_dim *  sizeof(data_t));
+            data_t *temp_2 = (data_t*)malloc(batch_size * output_dim *  sizeof(data_t));
             for(int i = 0; i < batch_size; ++i) {
                 for(int j = 0; j < output_dim; ++j) {
                     temp_2[i * output_dim + j] = 0.0;

@@ -1,14 +1,26 @@
 #ifndef _MODEL_H_
 #define _MODEL_H_
 
-#include "settings.h"
-
 #include <string.h>
 #include <math.h>
 #include <random>
 
+// model setting
+const int input_dim = 784;
+const int output_dim = 10;
+
+void set_hidden_layer_size(int new_size);
+
+// data type
+using data_t = float;
+
+void print(size_t n, data_t *a);
+void print2D(size_t n, size_t m, data_t *a, size_t padding);
+
 int *toDevice(const size_t n, int *x);
 int *toHost(const size_t n, int *x); 
+
+data_t *toDevice2D(const size_t n, const size_t m, data_t *x, size_t *padding);
 data_t *toDevice(const size_t n, data_t *x);
 data_t *toHost(const size_t n, data_t *x); 
 
@@ -36,8 +48,8 @@ class model {
         void backward();
         void zero_grad();
         void update(data_t lr);
-        data_t *forward(size_t batch_size, data_t *x);
-        data_t loss(size_t batch_size, data_t *pred, data_t *real);
+        data_t *forward(size_t batch_size, data_t *x, size_t padding_x, size_t *padding_pred);
+        data_t loss(size_t batch_size, data_t *pred, data_t *real, size_t padding_pred, size_t padding_real);
 };
 
 #endif

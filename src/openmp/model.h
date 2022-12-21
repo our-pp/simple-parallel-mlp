@@ -6,7 +6,17 @@
 
 #include <random>
 
-#include "settings.h"
+// model setting
+const int input_dim = 784;
+int hidden_dim = 300;
+const int output_dim = 10;
+
+void set_hidden_layer_size(int new_size) { hidden_dim = new_size; }
+
+// data type
+using data_t = float;
+
+void print(size_t n, data_t *a) {}
 
 int *toDevice(const size_t n, int *x) { return x; }
 
@@ -26,7 +36,6 @@ void fill_uniform(size_t n, data_t *a, const data_t L, const data_t R) {
 }
 
 void fill_val(size_t n, data_t *a, const data_t val) {
-#pragma omp parallel for
   for (size_t i = 0; i < n; ++i) {
     a[i] = val;
   }
@@ -99,10 +108,10 @@ class model {
     batch_count += batch_size;
     // first layer forward
     data_t *temp_1 = (data_t *)malloc(batch_size * hidden_dim * sizeof(data_t));
+#pragma omp parallel for
     for (int i = 0; i < batch_size; ++i) {
       for (int j = 0; j < hidden_dim; ++j) {
         data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
         for (int k = 0; k < input_dim; ++k) {
           result += x[i * input_dim + k] * w_1[k * hidden_dim + j];
         }
@@ -111,7 +120,6 @@ class model {
     }
     // add bias
     for (int j = 0; j < hidden_dim; ++j) {
-#pragma omp parallel for
       for (int i = 0; i < batch_size; ++i) {
         temp_1[i * hidden_dim + j] += bias_1[j];
       }
@@ -119,7 +127,6 @@ class model {
     // sigmoid
     for (int j = 0; j < hidden_dim; ++j) {
       data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
       for (int i = 0; i < batch_size; ++i) {
         temp_1[i * hidden_dim + j] = sigmoid(temp_1[i * hidden_dim + j]);
         result +=
@@ -128,20 +135,20 @@ class model {
       grad_sigmoid_1[j] += result;
     }
     // sum up for later calculation
+#pragma omp parallel for
     for (int j = 0; j < input_dim; ++j) {
       data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
       for (int i = 0; i < batch_size; ++i) {
         result += x[i * input_dim + j];
       }
       sum_1[j] += result;
     }
     // second layer forward
-    data_t *temp_2 = (data_t *)malloc(hidden_dim * output_dim * sizeof(data_t));
+    data_t *temp_2 = (data_t *)malloc(batch_size * output_dim * sizeof(data_t));
+#pragma omp parallel for
     for (int i = 0; i < batch_size; ++i) {
       for (int j = 0; j < output_dim; ++j) {
         data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
         for (int k = 0; k < hidden_dim; ++k) {
           result += temp_1[i * hidden_dim + k] * w_2[k * output_dim + j];
         }
@@ -150,7 +157,6 @@ class model {
     }
     // add bias
     for (int j = 0; j < output_dim; ++j) {
-#pragma omp parallel for
       for (int i = 0; i < batch_size; ++i) {
         temp_2[i * output_dim + j] += bias_2[j];
       }
@@ -158,7 +164,6 @@ class model {
     // sigmoid
     for (int j = 0; j < output_dim; ++j) {
       data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
       for (int i = 0; i < batch_size; ++i) {
         temp_2[i * output_dim + j] = sigmoid(temp_2[i * output_dim + j]);
         result +=
@@ -167,9 +172,9 @@ class model {
       grad_sigmoid_2[j] += result;
     }
     // sum up for later calculation
+#pragma omp parallel for
     for (int j = 0; j < hidden_dim; ++j) {
       data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
       for (int i = 0; i < batch_size; ++i) {
         result += temp_1[i * hidden_dim + j];
       }
@@ -179,64 +184,70 @@ class model {
     return temp_2;
   }
   void backward() {
-    // grad of loss
-#pragma omp parallel for
-    for (int i = 0; i < output_dim; ++i) {
-      grad_loss[i] /= batch_count * output_dim / 2.0;
-    }
-    // grad of second sigmoid
-#pragma omp parallel for
-    for (int i = 0; i < output_dim; ++i) {
-      grad_sigmoid_2[i] /= batch_count;
-      grad_sigmoid_2[i] *= grad_loss[i];
-    }
-    // grad of second bias
-#pragma omp parallel for
-    for (int i = 0; i < output_dim; ++i) {
-      grad_bias_2[i] = grad_sigmoid_2[i];
-    }
-    // grad of second w
-#pragma omp parallel for
-    for (int i = 0; i < hidden_dim; ++i) {
-      sum_2[i] /= batch_count;
-    }
-    for (int i = 0; i < hidden_dim; ++i) {
-      data_t result = 0;
-#pragma omp parallel for reduction(+ : result)
-      for (int j = 0; j < output_dim; ++j) {
-        grad_w_2[i * output_dim + j] = sum_2[i] * grad_sigmoid_2[j];
-        result += w_2[i * output_dim + j] * grad_sigmoid_2[j];
+#pragma omp parallel
+    {
+      // grad of loss
+#pragma omp for
+      for (int i = 0; i < output_dim; ++i) {
+        grad_loss[i] /= batch_count * output_dim / 2.0;
       }
-      prev_grad[i] = result;
+      // grad of second sigmoid
+#pragma omp for
+      for (int i = 0; i < output_dim; ++i) {
+        grad_sigmoid_2[i] /= batch_count;
+        grad_sigmoid_2[i] *= grad_loss[i];
+      }
+      // grad of second bias
+#pragma omp for
+      for (int i = 0; i < output_dim; ++i) {
+        grad_bias_2[i] = grad_sigmoid_2[i];
+      }
+      // grad of second w
+#pragma omp for
+      for (int i = 0; i < hidden_dim; ++i) {
+        sum_2[i] /= batch_count;
+      }
+#pragma omp for
+      for (int i = 0; i < hidden_dim; ++i) {
+        data_t result = 0;
+        for (int j = 0; j < output_dim; ++j) {
+          grad_w_2[i * output_dim + j] = sum_2[i] * grad_sigmoid_2[j];
+          result += w_2[i * output_dim + j] * grad_sigmoid_2[j];
+        }
+        prev_grad[i] = result;
+      }
     }
-    // grad of first sigmoid
-#pragma omp parallel for
-    for (int i = 0; i < hidden_dim; ++i) {
-      grad_sigmoid_1[i] /= batch_count;
-      grad_sigmoid_1[i] *= prev_grad[i];
-    }
-    // grad of first bias
-#pragma omp parallel for
-    for (int i = 0; i < hidden_dim; ++i) {
-      grad_bias_1[i] = grad_sigmoid_1[i];
-    }
-    // grad of first w
-#pragma omp parallel for
-    for (int i = 0; i < input_dim; ++i) {
-      sum_1[i] /= batch_count;
-    }
-#pragma omp parallel for
-    for (int i = 0; i < input_dim; ++i) {
-      for (int j = 0; j < hidden_dim; ++j) {
-        grad_w_1[i * hidden_dim + j] = sum_1[i] * grad_sigmoid_1[j];
+#pragma omp parallel
+    {
+      // grad of first sigmoid
+#pragma omp for
+      for (int i = 0; i < hidden_dim; ++i) {
+        grad_sigmoid_1[i] /= batch_count;
+        grad_sigmoid_1[i] *= prev_grad[i];
+      }
+      // grad of first bias
+#pragma omp for
+      for (int i = 0; i < hidden_dim; ++i) {
+        grad_bias_1[i] = grad_sigmoid_1[i];
+      }
+      // grad of first w
+#pragma omp for
+      for (int i = 0; i < input_dim; ++i) {
+        sum_1[i] /= batch_count;
+      }
+#pragma omp for
+      for (int i = 0; i < input_dim; ++i) {
+        for (int j = 0; j < hidden_dim; ++j) {
+          grad_w_1[i * hidden_dim + j] = sum_1[i] * grad_sigmoid_1[j];
+        }
       }
     }
   }
   data_t loss(size_t batch_size, data_t *pred, data_t *real) {
     data_t err = 0.0;
+    // #pragma omp parallel for reduction(+ : err)
     for (int j = 0; j < output_dim; ++j) {
       data_t result = 0, err_temp = 0;
-#pragma omp parallel for reduction(+ : result) reduction(+ : err_temp)
       for (int i = 0; i < batch_size; ++i) {
         data_t temp = pred[i * output_dim + j] - real[i * output_dim + j];
         result += temp;
@@ -261,27 +272,30 @@ class model {
     fill_val(hidden_dim, prev_grad, 0);
   }
   void update(data_t lr) {
-    // update linear layer 1
-#pragma omp parallel for
-    for (int i = 0; i < input_dim; ++i) {
-      for (int j = 0; j < hidden_dim; ++j) {
-        w_1[i * hidden_dim + j] -= lr * grad_w_1[i * hidden_dim + j];
+#pragma omp parallel
+    {
+      // update linear layer 1
+#pragma omp for
+      for (int i = 0; i < input_dim; ++i) {
+        for (int j = 0; j < hidden_dim; ++j) {
+          w_1[i * hidden_dim + j] -= lr * grad_w_1[i * hidden_dim + j];
+        }
       }
-    }
-#pragma omp parallel for
-    for (int i = 0; i < hidden_dim; ++i) {
-      bias_1[i] -= lr * grad_bias_1[i];
-    }
-    // update linear layer 2
-#pragma omp parallel for
-    for (int i = 0; i < hidden_dim; ++i) {
-      for (int j = 0; j < output_dim; ++j) {
-        w_2[i * output_dim + j] -= lr * grad_w_2[i * output_dim + j];
+#pragma omp for
+      for (int i = 0; i < hidden_dim; ++i) {
+        bias_1[i] -= lr * grad_bias_1[i];
       }
-    }
-#pragma omp parallel for
-    for (int i = 0; i < output_dim; ++i) {
-      bias_2[i] -= lr * grad_bias_2[i];
+      // update linear layer 2
+#pragma omp for
+      for (int i = 0; i < hidden_dim; ++i) {
+        for (int j = 0; j < output_dim; ++j) {
+          w_2[i * output_dim + j] -= lr * grad_w_2[i * output_dim + j];
+        }
+      }
+#pragma omp for
+      for (int i = 0; i < output_dim; ++i) {
+        bias_2[i] -= lr * grad_bias_2[i];
+      }
     }
   }
 };
