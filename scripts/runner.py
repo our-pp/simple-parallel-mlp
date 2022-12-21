@@ -29,6 +29,7 @@ class RunArgument:
     version: Literal["singleThread", "s", "openmp", "o", "cuda", "c"]
     batch_size: int
     hidden_size: int
+    epoch_count: int
     output: str
 
 
@@ -45,10 +46,13 @@ def configure_arguments() -> RunArgument:
         "-s", "--hidden-size", default=300, type=int, dest="hidden_size"
     )
     parser.add_argument("-o", "--output", default="loss.png", type=str)
+    parser.add_argument(
+        "-e", "--epoch-count", default=100, type=int, dest="epoch_count"
+    )
     return parser.parse_args()
 
 
-def run_task(args: RunArgument) -> tuple[list[float], float]:
+def run_task(args: RunArgument):
     result = subprocess.check_output(
         [
             BIN_DIR / VERSION_NAME_MAP[args.version],
@@ -56,26 +60,26 @@ def run_task(args: RunArgument) -> tuple[list[float], float]:
             str(args.batch_size),
             "--hidden-size",
             str(args.hidden_size),
+            "--epoch-count",
+            str(args.epoch_count),
         ],
         encoding="ascii",
         input="-1\n",
     )
 
+    print(result)
+
     matched = LOSS_PATTERN.finditer(result)
 
-    if matched is None:
-        print("Something went wrong...")
-        return
-
-    loss = [float(loss.group(1)) for loss in matched]
+    loss = []
+    if matched is not None:
+        loss = [float(loss.group(1)) for loss in matched]
 
     matched = TIME_PATTERN.search(result)
 
-    if matched is None:
-        print("Something went wrong...")
-        return
-    
-    time = float(matched.group(1))
+    time = 0
+    if matched is not None:
+        time = float(matched.group(1))
 
     return loss, time
 
@@ -93,7 +97,7 @@ def main() -> None:
 
     loss, time = run_task(args)
 
-    print(f"time: {time:.4f} sec")
+    print(f"time: {time:.4f} sec / epoch")
 
     draw_line_chart(loss, args.output)
 
