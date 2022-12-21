@@ -69,32 +69,34 @@ int main(int argc, char **argv) {
   while (~scanf("%d", &tmp) && tmp != -1) printImage(tmp, x, y);
 
   // send to device
-  x_train = toDevice(train_size * input_dim, x_train);
-  y_train = toDevice(train_size * output_dim, y_train);
+  size_t padding_x_train, padding_y_train, padding_pred;
+  x_train = toDevice2D(train_size, input_dim, x_train, &padding_x_train);
+  y_train = toDevice2D(train_size, output_dim, y_train, &padding_y_train);
   y = toDevice(train_size, y);
+
 
   double start_time = CycleTimer::currentSeconds();
   model myModel;
   for (int i = 1; i <= epoch; ++i) {
-    int iter = (train_size-1) / (batch_size)+1;
+    int iter = (train_size - 1) / batch_size + 1;
     data_t *pred, loss = 0, _accuracy_ = 0;
 
     // learning rate
-    data_t lr = 0.1;
+    data_t lr = 0.001;
     // printf("lr: %f\n", lr);
 
     for (int j = 0; j < iter; ++j) {
       myModel.zero_grad();
-      if(j == iter-1) {
+      if(j == iter - 1) {
         int tmp = train_size % batch_size;
         if (tmp == 0) tmp = batch_size;
-        pred = myModel.forward(tmp, x_train + j * batch_size * input_dim);
-        loss += myModel.loss(tmp, pred, y_train + j * batch_size * output_dim);
+        pred = myModel.forward(tmp, x_train + j * batch_size * padding_x_train, padding_x_train, &padding_pred);
+        loss += myModel.loss(tmp, pred, y_train + j * batch_size * padding_y_train, padding_pred, padding_y_train);
         // _accuracy_ += accuracy(tmp, pred, y + j * batch_size);
       }
       else {
-        pred = myModel.forward(batch_size, x_train + j * batch_size * input_dim);
-        loss += myModel.loss(batch_size, pred, y_train + j * batch_size * output_dim);
+        pred = myModel.forward(batch_size, x_train + j * batch_size * padding_x_train, padding_x_train, &padding_pred);
+        loss += myModel.loss(batch_size, pred, y_train + j * batch_size * padding_y_train, padding_pred, padding_y_train);
         // _accuracy_ += accuracy(batch_size, pred, y + j * batch_size);
       }
       myModel.backward();
