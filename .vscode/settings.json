@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "ranges": "cpp",
+        "functional": "cpp"
+    },
+    "python.formatting.provider": "black"
+}

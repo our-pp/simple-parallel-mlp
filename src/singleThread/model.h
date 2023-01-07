@@ -10,6 +10,10 @@ const int input_dim = 784;
 int hidden_dim = 300;
 const int output_dim = 10;
 
+void set_partition(int new_partition) {}
+void set_partition_x(int new_x) {}
+void set_partition_y(int new_y) {}
+
 void set_hidden_layer_size(int new_size) { hidden_dim = new_size; }
 
 // data type

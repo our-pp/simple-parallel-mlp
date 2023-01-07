@@ -1,7 +1,26 @@
 #include "model.h"
 
 
-int hidden_dim = 300;
+int hidden_dim = 800;
+
+const int MAX_TILE_DIM = 32;
+
+int partition_x = 32;
+int partition_y = 32;
+int partition = 32;
+
+void set_partition(int new_partition) {
+    partition = new_partition;
+}
+
+void set_partition_x(int new_x) {
+    partition_x = new_x;
+}
+
+void set_partition_y(int new_y) {
+    partition_y = new_y;
+}
+
 
 void set_hidden_layer_size(int new_size) {
     hidden_dim = new_size;
@@ -64,9 +83,8 @@ __global__ void __fill__(size_t n, data_t *a, const data_t val) {
 }
 
 void fill_val(size_t n, data_t *a, const data_t val) {
-    int numBlocks = (n - 1) / 32 + 1;
-    __fill__<<<numBlocks, 32>>>(n, a, val);
-    // print(output_dim, a);
+    int numBlocks = (n - 1) / partition + 1;
+    __fill__<<<numBlocks, partition>>>(n, a, val);
 }
 
 data_t sigmoid(data_t x) {
@@ -85,9 +103,10 @@ __global__ void __accuracy__(const size_t batch_size, data_t *pred, int *label, 
             if(argmax == -1 || pred[i * output_dim + j] > pred[i * output_dim + argmax])
                 argmax = j;
         }
-        if(argmax == label[i]) {
-            atomicAdd(correct, 1);
-        }
+        // if(argmax == label[i]) {
+        //     atomicAdd(correct, 1);
+        // }
+        // printf("%d\n", argmax);
     }
 } 
 
@@ -96,8 +115,8 @@ data_t accuracy(const size_t batch_size, data_t *pred, int *label) {
     int *device_correct;
     cudaMalloc(&device_correct, sizeof(int));
     cudaMemset(device_correct, 0, sizeof(int));
-    int numBlocks = (batch_size - 1) / 32 + 1;
-    __accuracy__<<<numBlocks, 32>>>(batch_size, pred, label, device_correct);
+    int numBlocks = (batch_size - 1) / partition + 1;
+    __accuracy__<<<numBlocks, partition>>>(batch_size, pred, label, device_correct);
     cudaMemcpy(&correct, device_correct, sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(device_correct);
     return (data_t)correct / batch_size;
@@ -117,6 +136,44 @@ __global__ void __mul__(size_t n, size_t m, size_t p, data_t *a, data_t *b, data
     }
 }
 
+__global__ void __mul_tilling__(size_t n, size_t m, size_t p, data_t *a, data_t *b, data_t *c) {
+
+    __shared__ data_t A[MAX_TILE_DIM][MAX_TILE_DIM];
+    __shared__ data_t B[MAX_TILE_DIM][MAX_TILE_DIM];
+
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    int j = blockDim.y * blockIdx.y + threadIdx.y;
+    
+    int TILE_DIM = blockDim.x;
+
+    data_t sum = 0.0;
+
+    for(int k = 0; k < (m + TILE_DIM - 1) / TILE_DIM; ++k) {
+
+        if (i < n && k * TILE_DIM + threadIdx.y < m)
+            A[threadIdx.x][threadIdx.y] = a[i * m + (k * TILE_DIM + threadIdx.y)];
+        else 
+            A[threadIdx.x][threadIdx.y] = 0.0;
+
+
+        if (k * TILE_DIM + threadIdx.x < m && j < p) 
+            B[threadIdx.x][threadIdx.y] = b[(k * TILE_DIM + threadIdx.y) * p + j];
+        else 
+            B[threadIdx.x][threadIdx.y] = 0.0;
+
+        __syncthreads();
+
+        for(int _ = 0; _ < TILE_DIM; ++_) {
+            sum += A[threadIdx.x][_] * B[_][threadIdx.y];
+        }
+        __syncthreads();
+
+    }
+
+    if(i < n && j < p)
+        c[i * p + j] = sum;
+
+}
 // b[i, j] += a[j]
 __global__ void __add__(size_t n, size_t m, data_t *a, data_t *b) {
     int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -252,8 +309,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     data_t *temp_1;
     cudaMalloc(&temp_1, batch_size * hidden_dim * sizeof(data_t));
     {
-        dim3 numBlocks((batch_size - 1) / 32 + 1, (hidden_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((batch_size - 1) / partition_x + 1, (hidden_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __mul__<<<numBlocks, numThreads>>>(batch_size, input_dim, hidden_dim, x, w_1, temp_1);    
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < hidden_dim; ++j) {
@@ -266,8 +323,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     }
     // add bias
     {
-        dim3 numBlocks((batch_size - 1) / 32 + 1, (hidden_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((batch_size - 1) / partition_x + 1, (hidden_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __add__<<<numBlocks, numThreads>>>(batch_size, hidden_dim, bias_1, temp_1);
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < hidden_dim; ++j) {
@@ -277,8 +334,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     }
     // sigmoid
     {
-        dim3 numBlocks((batch_size - 1) / 32 + 1, (hidden_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((batch_size - 1) / partition_x + 1, (hidden_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __sigmoid__<<<numBlocks, numThreads>>>(batch_size, hidden_dim, temp_1, grad_sigmoid_1);
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int  j = 0; j < hidden_dim; ++j) {
@@ -289,8 +346,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     }
     // sum up for later calculation
     {
-        int numBlocks = (input_dim - 1) / 32 + 1; 
-        __accumulate__<<<numBlocks, 32>>>(batch_size, input_dim, x, sum_1);
+        int numBlocks = (input_dim - 1) / partition + 1; 
+        __accumulate__<<<numBlocks, partition>>>(batch_size, input_dim, x, sum_1);
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < input_dim; ++j) {
         //         sum_1[j] += x[i * input_dim + j];
@@ -304,8 +361,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     // printf("????????\n");
     // print(output_dim, temp_2);
     {   
-        dim3 numBlocks((batch_size - 1) / 32 + 1, (output_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((batch_size - 1) / partition_x + 1, (output_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __mul__<<<numBlocks, numThreads>>>(batch_size, hidden_dim, output_dim, temp_1, w_2, temp_2); 
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < output_dim; ++j) {
@@ -320,8 +377,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     // print(output_dim, temp_2);
     // add bias
     {
-        dim3 numBlocks((batch_size - 1) / 32 + 1, (output_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((batch_size - 1) / partition_x + 1, (output_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __add__<<<numBlocks, numThreads>>>(batch_size, output_dim, bias_2, temp_2);
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < output_dim; ++j) {
@@ -331,8 +388,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     }
     // sigmoid
     {
-        dim3 numBlocks((batch_size - 1) / 32 + 1, (output_dim- 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((batch_size - 1) / partition_x + 1, (output_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __sigmoid__<<<numBlocks, numThreads>>>(batch_size, output_dim, temp_2, grad_sigmoid_2);
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < output_dim; ++j) {
@@ -343,8 +400,8 @@ data_t* model::forward(size_t batch_size, data_t *x) {
     }
     // sum up for later calculation
     {
-        int numBlocks = (hidden_dim - 1) / 32 + 1; 
-        __accumulate__<<<numBlocks, 32>>>(batch_size, hidden_dim, temp_1, sum_2);
+        int numBlocks = (hidden_dim - 1) / partition + 1; 
+        __accumulate__<<<numBlocks, partition>>>(batch_size, hidden_dim, temp_1, sum_2);
         // for(int i = 0; i < batch_size; ++i) {
         //     for(int j = 0; j < hidden_dim; ++j) {
         //         sum_2[j] += temp_1[i * hidden_dim + j];
@@ -408,17 +465,17 @@ void model::zero_grad() {
 void model::backward() {
     // grad of loss
     {
-        int numBlocks = (output_dim - 1) / 32 + 1;
-        __div__<<<numBlocks, 32>>>(output_dim, grad_loss, batch_count * output_dim / 2.0);
+        int numBlocks = (output_dim - 1) / partition + 1;
+        __div__<<<numBlocks, partition>>>(output_dim, grad_loss, batch_count * output_dim / 2.0);
         // for(int i = 0; i < output_dim; ++i) {
         //     grad_loss[i] /= batch_count * output_dim / 2.0;
         // }
     }
     // grad of second sigmoid
     {
-        int numBlocks = (output_dim - 1) / 32 + 1;
-        __div__<<<numBlocks, 32>>>(output_dim, grad_sigmoid_2, batch_count);
-        __mul__<<<numBlocks, 32>>>(output_dim, grad_sigmoid_2, grad_loss, grad_sigmoid_2);
+        int numBlocks = (output_dim - 1) / partition + 1;
+        __div__<<<numBlocks, partition>>>(output_dim, grad_sigmoid_2, batch_count);
+        __mul__<<<numBlocks, partition>>>(output_dim, grad_sigmoid_2, grad_loss, grad_sigmoid_2);
         // for(int i = 0; i < output_dim; ++i) {
         //     grad_sigmoid_2[i] /= batch_count;
         //     grad_sigmoid_2[i] *= grad_loss[i];
@@ -427,23 +484,23 @@ void model::backward() {
     }
     // grad of second bias
     {
-        int numBlocks = (output_dim - 1) / 32 + 1;
-        __copy__<<<numBlocks, 32>>>(output_dim, grad_sigmoid_2, grad_bias_2);
+        int numBlocks = (output_dim - 1) / partition + 1;
+        __copy__<<<numBlocks, partition>>>(output_dim, grad_sigmoid_2, grad_bias_2);
         // for(int i = 0; i < output_dim; ++i) {
         //     grad_bias_2[i] = grad_sigmoid_2[i];
         // }
     }
     // grad of second w
     {
-        int numBlocks = (hidden_dim - 1) / 32 + 1;
-        __div__<<<numBlocks, 32>>>(hidden_dim, sum_2, batch_count);
+        int numBlocks = (hidden_dim - 1) / partition + 1;
+        __div__<<<numBlocks, partition>>>(hidden_dim, sum_2, batch_count);
         // for(int i = 0; i < hidden_dim; ++i) {
         //     sum_2[i] /= batch_count;
         // }
     }
     {
-        dim3 numBlocks((hidden_dim - 1) / 32 + 1, (output_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((hidden_dim - 1) / partition_x + 1, (output_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __dot__<<<numBlocks, numThreads>>>(hidden_dim, output_dim, sum_2, grad_sigmoid_2, grad_w_2);
         // for(int i = 0; i < hidden_dim; ++i) {
         //     for(int j = 0; j < output_dim; ++j) {
@@ -452,8 +509,8 @@ void model::backward() {
         // }
     }
     {
-        int numBlocks = (hidden_dim - 1) / 32 + 1;
-        __sum__<<<numBlocks, 32>>>(hidden_dim, output_dim, w_2, grad_sigmoid_2, prev_grad);
+        int numBlocks = (hidden_dim - 1) / partition + 1;
+        __sum__<<<numBlocks, partition>>>(hidden_dim, output_dim, w_2, grad_sigmoid_2, prev_grad);
         // for(int i = 0; i < hidden_dim; ++i) {
         //     prev_grad[i] = 0.0;
         //     for(int j = 0; j < output_dim; ++j) {
@@ -463,9 +520,9 @@ void model::backward() {
     }
     // grad of first sigmoid
     {
-        int numBlocks = (hidden_dim - 1) / 32 + 1;
-        __div__<<<numBlocks, 32>>>(hidden_dim, grad_sigmoid_1, batch_count);
-        __mul__<<<numBlocks, 32>>>(hidden_dim, grad_sigmoid_1, prev_grad, grad_sigmoid_1);
+        int numBlocks = (hidden_dim - 1) / partition + 1;
+        __div__<<<numBlocks, partition>>>(hidden_dim, grad_sigmoid_1, batch_count);
+        __mul__<<<numBlocks, partition>>>(hidden_dim, grad_sigmoid_1, prev_grad, grad_sigmoid_1);
         // for(int i = 0; i < hidden_dim; ++i) {
         //     grad_sigmoid_1[i] /= batch_count;
         //     grad_sigmoid_1[i] *= prev_grad[i];
@@ -473,23 +530,23 @@ void model::backward() {
     }
     // grad of first bias
     {
-        int numBlocks = (hidden_dim - 1) / 32 + 1;
-        __copy__<<<numBlocks, 32>>>(hidden_dim, grad_sigmoid_1, grad_bias_1);
+        int numBlocks = (hidden_dim - 1) / partition + 1;
+        __copy__<<<numBlocks, partition>>>(hidden_dim, grad_sigmoid_1, grad_bias_1);
         // for(int i = 0; i < hidden_dim; ++i) {
         //     grad_bias_1[i] = grad_sigmoid_1[i];
         // }
     }
     // grad of first w
     {
-        int numBlocks = (input_dim - 1) / 32 + 1;
-        __div__<<<numBlocks, 32>>>(input_dim, sum_1, batch_count);
+        int numBlocks = (input_dim - 1) / partition + 1;
+        __div__<<<numBlocks, partition>>>(input_dim, sum_1, batch_count);
         // for(int i = 0; i < input_dim; ++i) {
         //     sum_1[i] /= batch_count;
         // }
     }
     {   
-        dim3 numBlocks((input_dim - 1) / 32 + 1, (hidden_dim - 1) / 32 + 1);
-        dim3 numThreads(32, 32);
+        dim3 numBlocks((input_dim - 1) / partition_x + 1, (hidden_dim - 1) / partition_y + 1);
+        dim3 numThreads(partition_x, partition_y);
         __dot__<<<numBlocks, numThreads>>>(input_dim, hidden_dim, sum_1, grad_sigmoid_1, grad_w_1);
         // for(int i = 0; i < input_dim; ++i) {
         //     for(int j = 0; j < hidden_dim; ++j) {
@@ -502,8 +559,8 @@ void model::backward() {
 void model::update(data_t lr) {
     // update linear layer 1
     {
-        int numBlocks = (input_dim * hidden_dim - 1) / 32 + 1;
-        __sub_eq__<<<numBlocks, 32>>>(input_dim * hidden_dim, grad_w_1, w_1, lr);
+        int numBlocks = (input_dim * hidden_dim - 1) / partition + 1;
+        __sub_eq__<<<numBlocks, partition>>>(input_dim * hidden_dim, grad_w_1, w_1, lr);
         // for(int i = 0; i < input_dim; ++i) {
         //     for(int j = 0; j < hidden_dim; ++j) {
         //         w_1[i * hidden_dim + j] -= lr * grad_w_1[i * hidden_dim + j];
@@ -511,16 +568,16 @@ void model::update(data_t lr) {
         // }
     }
     {
-        int numBlocks = (hidden_dim - 1) / 32 + 1;
-        __sub_eq__<<<numBlocks, 32>>>(hidden_dim, grad_bias_1, bias_1, lr);
+        int numBlocks = (hidden_dim - 1) / partition + 1;
+        __sub_eq__<<<numBlocks, partition>>>(hidden_dim, grad_bias_1, bias_1, lr);
         // for(int i = 0; i < hidden_dim; ++i) { 
         //     bias_1[i] -= lr * grad_bias_1[i];
         // }
     }    
     // update linear layer 2
     {
-        int numBlocks = (hidden_dim * output_dim - 1) / 32 + 1;
-        __sub_eq__<<<numBlocks, 32>>>(hidden_dim * output_dim, grad_w_2, w_2, lr);
+        int numBlocks = (hidden_dim * output_dim - 1) / partition + 1;
+        __sub_eq__<<<numBlocks, partition>>>(hidden_dim * output_dim, grad_w_2, w_2, lr);
         // for(int i = 0; i < hidden_dim; ++i) {
         //     for(int j = 0; j < output_dim; ++j) {
         //         w_2[i * output_dim + j] -= lr * grad_w_2[i * output_dim + j];
@@ -528,8 +585,8 @@ void model::update(data_t lr) {
         // }
     }
     {
-        int numBlocks = (output_dim - 1) / 32 + 1;
-        __sub_eq__<<<numBlocks, 32>>>(output_dim, grad_bias_2, bias_2, lr);
+        int numBlocks = (output_dim - 1) / partition + 1;
+        __sub_eq__<<<numBlocks, partition>>>(output_dim, grad_bias_2, bias_2, lr);
         // for(int i = 0; i < output_dim; ++i) {
         //     bias_2[i] -= lr * grad_bias_2[i];
         // }

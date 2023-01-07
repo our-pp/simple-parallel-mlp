@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
   size_t batch_size = 8192;
   int epoch = 3;
 
-  while ((opt = getopt_long(argc, argv, "b:h:t:e:", long_options, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "b:h:t:e:x:y:p:", long_options, nullptr)) !=
          EOF) {
     switch (opt) {
       case 'b': {
@@ -46,6 +46,18 @@ int main(int argc, char **argv) {
         int new_size = stoi(optarg);
         epoch = new_size;
         break;
+      }
+      case 'x': {
+        int new_x = stoi(optarg);
+        set_partition_x(new_x);
+      }
+      case 'y': {
+        int new_y = stoi(optarg);
+        set_partition_y(new_y);
+      }
+      case 'p': {
+        int part = stoi(optarg);
+        set_partition(part);
       }
     }
   }
@@ -90,12 +102,12 @@ int main(int argc, char **argv) {
         if (tmp == 0) tmp = batch_size;
         pred = myModel.forward(tmp, x_train + j * batch_size * input_dim);
         loss += myModel.loss(tmp, pred, y_train + j * batch_size * output_dim);
-        // _accuracy_ += accuracy(tmp, pred, y + j * batch_size);
+        _accuracy_ += accuracy(tmp, pred, y + j * batch_size);
       }
       else {
         pred = myModel.forward(batch_size, x_train + j * batch_size * input_dim);
         loss += myModel.loss(batch_size, pred, y_train + j * batch_size * output_dim);
-        // _accuracy_ += accuracy(batch_size, pred, y + j * batch_size);
+        _accuracy_ += accuracy(batch_size, pred, y + j * batch_size);
       }
       myModel.backward();
       myModel.update(lr);
