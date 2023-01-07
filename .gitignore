@@ -1,6 +1,8 @@
 bin/
 *.png
-
+dataset/
+image/
+.vscode/
 # Created by https://www.toptal.com/developers/gitignore/api/c,c++,cuda,python,linux,macos,windows
 # Edit at https://www.toptal.com/developers/gitignore?templates=c,c++,cuda,python,linux,macos,windows
 
